@@ -390,46 +390,84 @@ class VariableManager(QWidget):
             overrides_table.setItem(row, 1, QTableWidgetItem(str(value)))
 
     def add_or_update_override(self, variable_name, shot_input, value_input, overrides_table):
-        """Add or update an override for a variable."""
+        """Add or update an override for a specific variable."""
         shot = shot_input.text().strip()
         value = value_input.text().strip()
 
-        if not shot or not value:
-            QMessageBox.warning(self, "Error", "Shot and value must be provided!")
-            return
+        # Validate the value based on the variable type
+        variable_type = self.variables[variable_name]["type"]
 
-        # Parse the value based on variable type
-        var_type = self.variables[variable_name]["type"]
         try:
-            if var_type == "integer":
+            if variable_type == "boolean":
+                # Validate boolean value
+                if value.lower() not in ["true", "false"]:
+                    raise ValueError("Invalid boolean value. Please enter 'True' or 'False'.")
+                value = value.lower() == "true"
+            elif variable_type == "color":
+                # Validate color value (RGB format)
+                value = self.validate_color(value)
+            elif variable_type == "vector":
+                # Validate vector value (X, Y, Z)
+                value = self.validate_vector(value)
+            elif variable_type == "integer":
+                # Validate integer value
                 value = int(value)
-            elif var_type == "float":
+            elif variable_type == "float":
+                # Validate float value
                 value = float(value)
-            elif var_type == "boolean":
-                value = value.lower() in ("true", "1", "yes")
-            elif var_type == "vector":
-                # Split the input string by commas and convert to floats
-                value = [float(x.strip()) for x in value.split(",")]
-                if len(value) != 3:
-                    raise ValueError("Vector must have three values (X, Y, Z).")
-            elif var_type == "color":
-                # Split the input string by commas and convert to integers
-                value = [int(x.strip()) for x in value.split(",")]
-                if len(value) != 3 or not all(0 <= x <= 255 for x in value):
-                    raise ValueError("Color must have three integers (0-255) separated by commas.")
+            else:
+                # For string type, no specific validation
+                pass
+            
+            # Add or update the override
+            self.variables[variable_name]["overrides"][shot] = value
+
+            # Update the table with the new or updated override
+            for row in range(overrides_table.rowCount()):
+                if overrides_table.item(row, 0).text() == shot:
+                    overrides_table.setItem(row, 1, QTableWidgetItem(str(value)))
+                    return
+            
+            # If no existing override, add a new one
+            row = overrides_table.rowCount()
+            overrides_table.insertRow(row)
+            overrides_table.setItem(row, 0, QTableWidgetItem(shot))
+            overrides_table.setItem(row, 1, QTableWidgetItem(str(value)))
+
         except ValueError as e:
-            QMessageBox.warning(self, "Error", f"Invalid value for type {var_type}: {e}")
+            QMessageBox.warning(self, "Error", str(e))
             return
 
-        # Add or update the override
-        self.variables[variable_name].setdefault("overrides", {})[shot] = value
+    def validate_color(self, value):
+        """Validate and parse the color input (RGB format)."""
+        try:
+            value = value.replace("(", "").replace(")", "").replace("[", "").replace("]", "")
+            color_parts = [int(x.strip()) for x in value.split(",")]
+            if len(color_parts) != 3:
+                raise ValueError("Color must have three values separated by commas (e.g., 255, 0, 0).")
+            
+            color_value = tuple(x for x in color_parts)
+            if not all(0 <= x <= 255 for x in color_value):
+                raise ValueError("Each color component must be between 0 and 255.")
+            
+            return color_parts
+        
+        except Exception as e:
+            raise ValueError(f"Invalid color format: {e}")
 
-        # Refresh the overrides table
-        self.refresh_overrides_table(variable_name, overrides_table)
+    def validate_vector(self, value):
+        """Validate and parse the vector input (X, Y, Z)."""
+        try:
+            value = value.replace("(", "").replace(")", "").replace("[", "").replace("]", "")
+            vector_parts = [float(x.strip()) for x in value.split(",")]
 
-        # Clear inputs
-        shot_input.clear()
-        value_input.clear()
+            if len(vector_parts) != 3:
+                raise ValueError("Vector must have three values (X, Y, Z) separated by commas.")
+
+            return vector_parts
+
+        except Exception as e:
+            raise ValueError(f"Invalid vector format: {e}")
 
     def on_table_item_changed(self, item):
         """Handle the event when an item in the main table is edited."""
@@ -502,7 +540,7 @@ class VariableManager(QWidget):
 
                     # Update the variable with the new vector value
                     self.variables[variable_name]["default"] = vector_parts
-                    item.setText(f"{', '.join(map(str, vector_parts))}")
+                    item.setText(f"[{', '.join(map(str, vector_parts))}]")
                     print(f"Updated vector default value to: {vector_parts}")  # Debugging
 
                 except ValueError:

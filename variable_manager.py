@@ -109,9 +109,10 @@ class VariableManager(QWidget):
                     raise ValueError("Invalid color input. Please enter three integers (0-255) separated by commas.")
                 default_value = tuple(map(int, color_value.split(",")))
             elif var_type == "vector":
-                vector_values = [float(x.strip()) for x in default_input]
+                # Extract values from the tuple of QLineEdits
+                vector_values = [float(input_field.text().strip()) for input_field in default_input]
                 if len(vector_values) != 3:
-                    raise ValueError("Vector must have three float values.")
+                    raise ValueError("Vector must have exactly three float values (X, Y, Z).")
                 default_value = vector_values
             else:
                 default_value = default_input.text().strip()
@@ -129,7 +130,12 @@ class VariableManager(QWidget):
         print(f"Variable added: {name} of type {var_type} with default {default_value}")
 
         # Accept the dialog
-        dialog = default_input.window()
+        dialog = None
+        if isinstance(default_input, tuple):  # For vector type, get the parent dialog from one of the inputs
+            dialog = default_input[0].window()
+        else:
+            dialog = default_input.window()
+
         if isinstance(dialog, QDialog):
             dialog.accept()
 
@@ -206,7 +212,6 @@ class VariableManager(QWidget):
             button.clicked.connect(lambda _, n=name: self.manage_overrides(n))
             self.table.setCellWidget(row, 3, button)
 
-
     def delete_selected_row(self):
         """Delete the selected row in the main table."""
         selected_row = self.table.currentRow()
@@ -254,11 +259,16 @@ class VariableManager(QWidget):
                 self.current_default_input = color_button
             elif selected_type == "vector":
                 x_input = QLineEdit()
+                x_input.setPlaceholderText("x")
                 y_input = QLineEdit()
+                y_input.setPlaceholderText("y")
                 z_input = QLineEdit()
-                self.default_input_container.addWidget(x_input)
-                self.default_input_container.addWidget(y_input)
-                self.default_input_container.addWidget(z_input)
+                z_input.setPlaceholderText("z")
+                vector_layout = QHBoxLayout()
+                vector_layout.addWidget(x_input)
+                vector_layout.addWidget(y_input)
+                vector_layout.addWidget(z_input)
+                self.default_input_container.addLayout(vector_layout)
                 self.current_default_input = (x_input, y_input, z_input)
             elif selected_type == "boolean":
                 boolean_input = QComboBox()
@@ -430,55 +440,51 @@ class VariableManager(QWidget):
         # Block signals temporarily to prevent recursion
         self.table.blockSignals(True)
 
+        print(f"Editing row {row}, column {column} for variable '{variable_name}'")  # Debugging
+
         if column == 2:  # Default Value column
             new_value = item.text()
+            print(f"New value entered: {new_value}")  # Debugging
 
             # Get the variable type
             var_type = self.variables[variable_name]["type"]
+            print(f"Variable type: {var_type}")  # Debugging
 
             # Validate the default value based on type
             if var_type == "boolean":
                 if new_value.lower() not in ["true", "false"]:
+                    print(f"Invalid boolean value: {new_value}")  # Debugging
                     QMessageBox.warning(self, "Error", "Invalid value for boolean type. Please enter 'True' or 'False'.")
                     item.setText(str(self.variables[variable_name]["default"]))  # Revert to the old value
                     self.table.blockSignals(False)  # Re-enable signals
                     return
                 else:
                     self.variables[variable_name]["default"] = new_value.lower() == "true"
+                    print(f"Updated boolean default value to: {self.variables[variable_name]['default']}")  # Debugging
 
             elif var_type == "color":
                 try:
-                    # Print the raw input value to debug
-                    print(f"Raw input for color: {new_value}")
-
                     # Remove parentheses or brackets if they exist
                     new_value = new_value.replace("(", "").replace(")", "").replace("[", "").replace("]", "")
                     color_parts = [x.strip() for x in new_value.split(",")]
-
-                    # Print the processed color parts for debugging
-                    print(f"Processed color parts: {color_parts}")
+                    print(f"Processed color parts: {color_parts}")  # Debugging
 
                     # Ensure there are exactly 3 values (RGB)
                     if len(color_parts) != 3:
                         raise ValueError("Color must have three values separated by commas (e.g. 255, 0, 0).")
 
-                    # Convert parts to integers
-                    value = tuple(int(x) for x in color_parts)
-
-                    # Validate the range of each color component (0 to 255)
-                    if not all(0 <= x <= 255 for x in value):
+                    # Convert parts to integers and validate range
+                    value = tuple(int(x) for x in color_parts if 0 <= int(x) <= 255)
+                    if len(value) != 3:
                         raise ValueError("Each color component must be between 0 and 255.")
 
-                    # If no issues, update the variable with the new color value
+                    # Update the variable with the new color value
                     self.variables[variable_name]["default"] = value
-
-                    # Print the final validated color value
-                    print(f"Color value successfully updated: {value}")
-
-                    # Set the value back in the table as a string with square brackets
                     item.setText(f"[{', '.join(map(str, value))}]")
+                    print(f"Updated color default value to: {value}")  # Debugging
 
                 except ValueError as e:
+                    print(f"Error parsing color: {str(e)}")  # Debugging
                     QMessageBox.warning(self, "Error", f"Invalid value for color type. {str(e)}")
                     item.setText(str(self.variables[variable_name]["default"]))  # Revert to the old value
                     self.table.blockSignals(False)  # Re-enable signals
@@ -486,11 +492,21 @@ class VariableManager(QWidget):
 
             elif var_type == "vector":
                 try:
-                    value = [float(x.strip()) for x in new_value.split(",")]
-                    if len(value) != 3:
-                        raise ValueError("Vector must have three values (X, Y, Z).")
-                    self.variables[variable_name]["default"] = value
+                    # Remove any extra spaces and split by commas
+                    new_value = new_value.replace("(", "").replace(")", "").replace("[", "").replace("]", "")
+                    vector_parts = [float(x.strip()) for x in new_value.split(",")]
+                    print(f"Processed vector parts: {vector_parts}")  # Debugging
+
+                    if len(vector_parts) != 3:
+                        raise ValueError("Vector must have three values (X, Y, Z) separated by commas.")
+
+                    # Update the variable with the new vector value
+                    self.variables[variable_name]["default"] = vector_parts
+                    item.setText(f"{', '.join(map(str, vector_parts))}")
+                    print(f"Updated vector default value to: {vector_parts}")  # Debugging
+
                 except ValueError:
+                    print(f"Invalid vector input: {new_value}")  # Debugging
                     QMessageBox.warning(self, "Error", "Invalid value for vector type. Please enter three numbers (X, Y, Z) separated by commas.")
                     item.setText(str(self.variables[variable_name]["default"]))  # Revert to the old value
                     self.table.blockSignals(False)  # Re-enable signals
@@ -499,7 +515,9 @@ class VariableManager(QWidget):
             elif var_type == "integer":
                 try:
                     self.variables[variable_name]["default"] = int(new_value)
+                    print(f"Updated integer default value to: {self.variables[variable_name]['default']}")  # Debugging
                 except ValueError:
+                    print(f"Invalid integer input: {new_value}")  # Debugging
                     QMessageBox.warning(self, "Error", "Invalid value for integer type. Please enter an integer.")
                     item.setText(str(self.variables[variable_name]["default"]))  # Revert to the old value
                     self.table.blockSignals(False)  # Re-enable signals
@@ -508,7 +526,9 @@ class VariableManager(QWidget):
             elif var_type == "float":
                 try:
                     self.variables[variable_name]["default"] = float(new_value)
+                    print(f"Updated float default value to: {self.variables[variable_name]['default']}")  # Debugging
                 except ValueError:
+                    print(f"Invalid float input: {new_value}")  # Debugging
                     QMessageBox.warning(self, "Error", "Invalid value for float type. Please enter a float.")
                     item.setText(str(self.variables[variable_name]["default"]))  # Revert to the old value
                     self.table.blockSignals(False)  # Re-enable signals
@@ -517,6 +537,7 @@ class VariableManager(QWidget):
             else:
                 # For string type, no validation needed
                 self.variables[variable_name]["default"] = new_value
+                print(f"Updated string default value to: {new_value}")  # Debugging
 
         # Re-enable signals after processing the change
         self.table.blockSignals(False)

@@ -1,7 +1,9 @@
 import json
 import os
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget, QTableWidgetItem, QDialog, QFormLayout, QDialogButtonBox, QMessageBox, QLineEdit, QComboBox, QColorDialog, QLabel
+import sys
+from PyQt5.QtGui import QFont
 from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget, QTableWidgetItem, QDialog, QFormLayout, QDialogButtonBox, QMessageBox, QLineEdit, QComboBox, QColorDialog, QLabel
 from utils import load_json, save_json
 
 class VariableManager(QWidget):
@@ -13,6 +15,7 @@ class VariableManager(QWidget):
         self.base_filename = os.path.join(self.base_directory, "variables")
         self.latest_file = f"{self.base_filename}_latest.json"
         self.variables = self.load_latest_variables()
+        self.setFixedWidth(600)
         self.init_ui()
 
     def init_ui(self):
@@ -25,6 +28,10 @@ class VariableManager(QWidget):
         self.table.itemChanged.connect(self.on_table_item_changed)  # Connect item changes
         layout.addWidget(self.table)
 
+        self.table.setColumnWidth(0, 100)  # Set "Name" column width to 200px
+        self.table.setColumnWidth(1, 100)  # Set "Type" column width to 150px
+        self.table.setColumnWidth(2, 100)  # Set "Default Value" column width to 150px
+        self.table.setColumnWidth(3, 250)  # Set "Override Per Shot" column width to 200px
         # Disable editing for the "Type" column (index 1)
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 1)
@@ -46,7 +53,13 @@ class VariableManager(QWidget):
         button_layout.addWidget(delete_row_button)
         layout.addLayout(button_layout)
 
+        # Refresh table and clear selection
         self.refresh_table()
+
+        # Ensure no row, column, or cell is selected when the table is first displayed
+        self.table.clearSelection()
+        self.table.setFocusPolicy(Qt.NoFocus)  # Prevent the table from getting focus automatically
+
         self.setLayout(layout)
 
     def handle_color_validation_in_table(self, row, column):
@@ -191,7 +204,7 @@ class VariableManager(QWidget):
 
     def refresh_table(self):
         """Update the main table with current variables."""
-        self.table.setRowCount(0)
+        self.table.setRowCount(0)  # Clear existing rows
         for name, data in self.variables.items():
             row = self.table.rowCount()
             self.table.insertRow(row)
@@ -211,6 +224,9 @@ class VariableManager(QWidget):
             button = QPushButton("Manage Overrides")
             button.clicked.connect(lambda _, n=name: self.manage_overrides(n))
             self.table.setCellWidget(row, 3, button)
+
+        # Ensure no row, column, or cell is selected when the table is first displayed
+        self.table.clearSelection()
 
     def delete_selected_row(self):
         """Delete the selected row in the main table."""
@@ -322,16 +338,21 @@ class VariableManager(QWidget):
         overrides_table = QTableWidget(0, 2)
         overrides_table.setHorizontalHeaderLabels(["Shot", "Value"])
         overrides_table.setEditTriggers(QTableWidget.AllEditTriggers)  # Allow editing in all columns
-        overrides_table.itemChanged.connect(lambda item: self.on_override_item_changed(variable_name, item, overrides_table))  # Connect item changes
+        overrides_table.itemChanged.connect(
+            lambda item: self.on_override_item_changed(variable_name, item, overrides_table)
+        )  # Connect item changes
         layout.addWidget(overrides_table)
 
         # Populate table with existing overrides
         variable_data = self.variables[variable_name]
-        for shot, value in variable_data.get("overrides", {}).items():
+        overrides = variable_data.get("overrides", {})
+
+        # Safely iterate over a copy of the overrides dictionary
+        for shot, value in list(overrides.items()):  # Create a copy of the items to iterate safely
             row = overrides_table.rowCount()
             overrides_table.insertRow(row)
             overrides_table.setItem(row, 0, QTableWidgetItem(shot))
-            overrides_table.setItem(row, 1, QTableWidgetItem(str(value)))
+            overrides_table.setItem(row, 1, QTableWidgetItem(repr(value)))  # Use repr for display
 
         # Add new override input fields
         shot_input = QLineEdit()
@@ -341,10 +362,14 @@ class VariableManager(QWidget):
         value_input.setPlaceholderText("Override Value")
 
         add_override_button = QPushButton("Add/Update Override")
-        add_override_button.clicked.connect(lambda: self.add_or_update_override(variable_name, shot_input, value_input, overrides_table))
+        add_override_button.clicked.connect(
+            lambda: self.add_or_update_override(variable_name, shot_input, value_input, overrides_table)
+        )
 
         delete_override_button = QPushButton("Delete Selected Override")
-        delete_override_button.clicked.connect(lambda: self.delete_selected_override(variable_name, overrides_table))
+        delete_override_button.clicked.connect(
+            lambda: self.delete_selected_override(variable_name, overrides_table)
+        )
 
         layout.addWidget(QLabel("Add/Update Override:"))
         layout.addWidget(shot_input)
@@ -394,49 +419,43 @@ class VariableManager(QWidget):
         shot = shot_input.text().strip()
         value = value_input.text().strip()
 
-        # Validate the value based on the variable type
+        if not shot:
+            QMessageBox.warning(self, "Error", "Shot cannot be empty.")
+            return
+
         variable_type = self.variables[variable_name]["type"]
 
         try:
             if variable_type == "boolean":
-                # Validate boolean value
                 if value.lower() not in ["true", "false"]:
                     raise ValueError("Invalid boolean value. Please enter 'True' or 'False'.")
                 value = value.lower() == "true"
             elif variable_type == "color":
-                # Validate color value (RGB format)
                 value = self.validate_color(value)
             elif variable_type == "vector":
-                # Validate vector value (X, Y, Z)
                 value = self.validate_vector(value)
             elif variable_type == "integer":
-                # Validate integer value
                 value = int(value)
             elif variable_type == "float":
-                # Validate float value
                 value = float(value)
-            else:
-                # For string type, no specific validation
-                pass
-            
-            # Add or update the override
+
+            # Store the converted value
             self.variables[variable_name]["overrides"][shot] = value
 
-            # Update the table with the new or updated override
+            # Update or insert the value in the table
             for row in range(overrides_table.rowCount()):
                 if overrides_table.item(row, 0).text() == shot:
-                    overrides_table.setItem(row, 1, QTableWidgetItem(str(value)))
+                    overrides_table.setItem(row, 1, QTableWidgetItem(repr(value)))
                     return
-            
-            # If no existing override, add a new one
+
+            # Add a new row
             row = overrides_table.rowCount()
             overrides_table.insertRow(row)
             overrides_table.setItem(row, 0, QTableWidgetItem(shot))
-            overrides_table.setItem(row, 1, QTableWidgetItem(str(value)))
+            overrides_table.setItem(row, 1, QTableWidgetItem(repr(value)))
 
         except ValueError as e:
             QMessageBox.warning(self, "Error", str(e))
-            return
 
     def validate_color(self, value):
         """Validate and parse the color input (RGB format)."""
@@ -582,8 +601,69 @@ class VariableManager(QWidget):
 
     def on_override_item_changed(self, variable_name, item, overrides_table):
         """Handle the event when an override item is edited."""
-        shot = overrides_table.item(item.row(), 0).text()
-        value = item.text()
+        # Identify the column and row being edited
+        column = item.column()
+        row = item.row()
 
-        if shot in self.variables[variable_name]["overrides"]:
-            self.variables[variable_name]["overrides"][shot] = value
+        # If the Shot column (0) is edited
+        if column == 0:
+            # Get the old shot from the table (we're using the shot from the edited row directly)
+            old_shot = overrides_table.item(row, 0).text().strip()
+            new_shot = item.text().strip()
+
+            # Update the backend with the new shot key (without any validation)
+            # Get the current shot value and replace the key in the overrides dictionary
+            if new_shot != old_shot:
+                # Directly update the backend with the new shot key
+                self.variables[variable_name]["overrides"][new_shot] = self.variables[variable_name]["overrides"].pop(old_shot)
+
+        # If the Value column (1) is edited
+        elif column == 1:
+            # Retrieve the shot and the value from the table
+            shot = overrides_table.item(row, 0).text().strip()
+            value = item.text().strip()
+
+            # Get the type of the variable
+            variable_type = self.variables[variable_name]["type"]
+
+            try:
+                # Validate and convert the value based on its type
+                if variable_type == "boolean":
+                    if value.lower() not in ["true", "false"]:
+                        raise ValueError("Invalid boolean value. Please enter 'True' or 'False'.")
+                    value = value.lower() == "true"
+                elif variable_type == "color":
+                    value = self.validate_color(value)  # Validate color (RGB format)
+                elif variable_type == "vector":
+                    value = self.validate_vector(value)  # Validate vector (X, Y, Z)
+                elif variable_type == "integer":
+                    value = int(value)  # Convert to integer
+                elif variable_type == "float":
+                    value = float(value)  # Convert to float
+
+                # Update the backend override
+                self.variables[variable_name]["overrides"][shot] = value
+
+            except ValueError as e:
+                # Revert the value in the table to the previous valid value
+                current_value = self.variables[variable_name]["overrides"].get(shot, "")
+                overrides_table.blockSignals(True)
+                overrides_table.setItem(row, 1, QTableWidgetItem(repr(current_value)))
+                overrides_table.blockSignals(False)
+                QMessageBox.warning(self, "Error", str(e))
+
+# If not running directly as main, ensure this part runs manually
+app = QApplication(sys.argv)
+
+# Set the font to Open Sans regular (or fallback to Arial if not available)
+font = QFont("Open Sans", 10)  # Font size 10
+if not font.family() == "Open Sans":
+    font = QFont("Arial", 10)  # Fallback to Arial if Open Sans is unavailable
+app.setFont(font)
+
+# Initialize the main window
+window = VariableManager()
+window.show()
+
+# Run the application
+sys.exit(app.exec_())

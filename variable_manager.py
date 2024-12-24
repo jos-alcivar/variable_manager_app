@@ -10,7 +10,7 @@ class VariableManager(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Variable Manager")
-        self.base_directory = "E:/dev/projects/vfx/misc.tools/json_files"
+        self.base_directory = "E:/dev/projects/vfx/misc.tools/variable_manager_app/json_files"
         os.makedirs(self.base_directory, exist_ok=True)
         self.base_filename = os.path.join(self.base_directory, "variables")
         self.latest_file = f"{self.base_filename}_latest.json"
@@ -607,15 +607,14 @@ class VariableManager(QWidget):
 
         # If the Shot column (0) is edited
         if column == 0:
-            # Get the old shot from the table (we're using the shot from the edited row directly)
-            old_shot = overrides_table.item(row, 0).text().strip()
+            # Get the shot key before the edit from the backend
+            shot = list(self.variables[variable_name]["overrides"].keys())[row]
             new_shot = item.text().strip()
 
-            # Update the backend with the new shot key (without any validation)
-            # Get the current shot value and replace the key in the overrides dictionary
-            if new_shot != old_shot:
-                # Directly update the backend with the new shot key
-                self.variables[variable_name]["overrides"][new_shot] = self.variables[variable_name]["overrides"].pop(old_shot)
+            # Only update the backend if the new shot is different from the old shot
+            if new_shot != shot:
+                # Update the backend with the new shot key (without any validation)
+                self.variables[variable_name]["overrides"][new_shot] = self.variables[variable_name]["overrides"].pop(shot)
 
         # If the Value column (1) is edited
         elif column == 1:
